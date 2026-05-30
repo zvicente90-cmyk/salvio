@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: salvio
+          POSTGRES_PASSWORD: salvio_pass
+          POSTGRES_DB: salvio_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U salvio -d salvio_db"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install flake8 black
+
+      - name: Wait for Postgres
+        run: |
+          until pg_isready -h localhost -p 5432 -U salvio; do sleep 1; done
+        env:
+          PGPASSWORD: salvio_pass
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgresql://salvio:salvio_pass@localhost:5432/salvio_db
+        run: |
+          python -m alembic upgrade head
+
+      - name: Start server
+        run: |
+          nohup uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 &
+          sleep 2
+
+      - name: Lint and format check
+        run: |
+          flake8 backend || true
+          black --check . || true
+
+      - name: Wait for API
+        run: |
+          until curl -f http://127.0.0.1:8000/health; do
+            echo "Esperando API..."
+            sleep 2
+          done
+
+      - name: Run tests
+        env:
+          BASE_URL: http://127.0.0.1:8000
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          pytest -q backend/tests
