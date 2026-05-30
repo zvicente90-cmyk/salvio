@@ -46,14 +46,18 @@ jobs:
         env:
           DATABASE_URL: postgresql://salvio:salvio_pass@localhost:5432/salvio_db
         run: |
-          # ensure we're at repo root and alembic scripts folder exists
-          if [ ! -d "alembic" ]; then
-            echo "ERROR: alembic scripts folder not found at $(pwd)/alembic";
+          # Support alembic folder at repo root or under backend/
+          if [ -d "backend/alembic" ]; then
+            echo "Found alembic in backend/ — running migrations from backend";
+            python -m alembic -c backend/alembic.ini upgrade head
+          elif [ -d "alembic" ]; then
+            echo "Found alembic in repo root — running migrations from repo root";
+            python -m alembic -c alembic.ini upgrade head
+          else
+            echo "ERROR: alembic scripts folder not found in repo root or backend/";
             echo "Listing repo root:"; ls -la || true;
             exit 1;
           fi
-          # run alembic using explicit config file
-          python -m alembic -c alembic.ini upgrade head
 
       - name: Start server
         run: |
